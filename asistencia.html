@@ -1,0 +1,221 @@
+
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#142d4e">
+  <title>Cole Gon | Asistencia</title>
+
+  <style>
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background: #f2f5f9;
+      color: #172b45;
+    }
+
+    header {
+      background: #142d4e;
+      color: white;
+      padding: 24px 16px;
+      text-align: center;
+    }
+
+    header h1 {
+      margin: 0 0 8px;
+      font-size: 28px;
+    }
+
+    main {
+      max-width: 520px;
+      margin: 28px auto;
+      padding: 24px;
+      background: white;
+      border-radius: 16px;
+      box-shadow: 0 4px 18px #00000012;
+    }
+
+    button {
+      width: 100%;
+      border: 0;
+      border-radius: 10px;
+      padding: 15px;
+      font-size: 16px;
+      font-weight: bold;
+      cursor: pointer;
+      margin-top: 12px;
+    }
+
+    #iniciar {
+      background: #142d4e;
+      color: white;
+    }
+
+    #detener {
+      background: #e8edf3;
+      color: #142d4e;
+    }
+
+    #estado {
+      margin-top: 20px;
+      padding: 15px;
+      border-radius: 10px;
+      background: #eef3f8;
+      overflow-wrap: anywhere;
+      line-height: 1.5;
+    }
+
+    .nota {
+      color: #52647a;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+  </style>
+</head>
+
+<body>
+  <header>
+    <h1>Cole Gon</h1>
+    <p>Registro de asistencia</p>
+  </header>
+
+  <main>
+    <h2>Leer tarjeta NFC</h2>
+
+    <p>
+      Pulsa el botón y acerca la tarjeta a la parte trasera
+      del móvil. Mantén esta página abierta durante la lectura.
+    </p>
+
+    <button id="iniciar">Leer tarjeta NFC</button>
+    <button id="detener" hidden>Detener lectura</button>
+
+    <div id="estado" role="status" aria-live="polite">
+      Preparado para iniciar.
+    </div>
+
+    <p class="nota">
+      Necesitas un móvil Android compatible con NFC,
+      NFC activado y conexión a Internet.
+    </p>
+  </main>
+
+  <script>
+    const SCRIPT_URL =
+      "https://script.google.com/macros/s/AKfycbxCs1Hi1dsE9lm8bK71nzqQyq-f5-pGtDw7f-YGbaVdOLSMySYAYZ7x3bT66_Sfh19R/exec";
+
+    const iniciar = document.getElementById("iniciar");
+    const detener = document.getElementById("detener");
+    const estado = document.getElementById("estado");
+
+    let lector = null;
+    let activo = false;
+    let ultimoCodigo = "";
+    let ultimaLectura = 0;
+
+    function mostrar(mensaje) {
+      estado.textContent = mensaje;
+    }
+
+    iniciar.addEventListener("click", async () => {
+      if (!("NDEFReader" in window)) {
+        mostrar(
+          "Este navegador no admite lectura NFC web. " +
+          "Prueba Chrome actualizado en Android y comprueba NFC."
+        );
+        return;
+      }
+
+      try {
+        lector = new NDEFReader();
+        await lector.scan();
+
+        activo = true;
+        iniciar.hidden = true;
+        detener.hidden = false;
+
+        mostrar("Lector activado. Acerca una tarjeta NFC.");
+
+        lector.onreadingerror = () => {
+          mostrar("No se pudo leer la tarjeta. Inténtalo otra vez.");
+        };
+
+        lector.onreading = async (evento) => {
+          if (!activo) return;
+
+          const registro = Array.from(
+            evento.message.records
+          ).find(r => r.recordType === "text");
+
+          if (!registro) {
+            mostrar("La tarjeta no contiene un registro de texto.");
+            return;
+          }
+
+          const codigo = new TextDecoder(
+            registro.encoding || "utf-8"
+          ).decode(registro.data).trim().toUpperCase();
+
+          if (!/^CG-[A-Z0-9]{6}$/.test(codigo)) {
+            mostrar("El código de la tarjeta no es válido.");
+            return;
+          }
+
+          const ahora = Date.now();
+
+          if (
+            codigo === ultimoCodigo &&
+            ahora - ultimaLectura < 3000
+          ) {
+            return;
+          }
+
+          ultimoCodigo = codigo;
+          ultimaLectura = ahora;
+
+          mostrar("Tarjeta " + codigo + " leída. Enviando…");
+
+          try {
+            await fetch(SCRIPT_URL, {
+              method: "POST",
+              mode: "no-cors",
+              headers: {
+                "Content-Type": "text/plain;charset=UTF-8"
+              },
+              body: JSON.stringify({ codigo: codigo })
+            });
+
+            mostrar(
+              "Solicitud enviada para " + codigo +
+              ". Comprueba la hoja de Google Sheets para confirmar " +
+              "que se ha registrado correctamente."
+            );
+          } catch (error) {
+            mostrar(
+              "No se pudo enviar la solicitud. " +
+              "Comprueba la conexión y la URL de Apps Script."
+            );
+          }
+        };
+
+      } catch (error) {
+        mostrar(
+          "No se pudo iniciar la lectura NFC. Comprueba que NFC " +
+          "esté activado y permite el acceso si el navegador lo solicita."
+        );
+      }
+    });
+
+    detener.addEventListener("click", () => {
+      activo = false;
+      lector = null;
+      iniciar.hidden = false;
+      detener.hidden = true;
+      mostrar("Lectura detenida.");
+    });
+  </script>
+</body>
+</html>
