@@ -56,9 +56,14 @@
       cursor: wait;
     }
 
-    #iniciar {
+    #iniciarNfc {
       background: #142d4e;
       color: white;
+    }
+
+    #iniciarCamara {
+      background: #e8edf3;
+      color: #142d4e;
     }
 
     #detener {
@@ -90,6 +95,22 @@
     #salida {
       background: #a83232;
       color: white;
+    }
+
+    #lectorCamara {
+      width: 100%;
+      margin-top: 15px;
+      overflow: hidden;
+      border-radius: 10px;
+    }
+
+    #lectorCamara[hidden] {
+      display: none;
+    }
+
+    #lectorCamara video {
+      max-width: 100%;
+      border-radius: 10px;
     }
 
     #estado {
@@ -127,46 +148,74 @@
   </header>
 
   <main>
-    <h2>Leer tarjeta NFC</h2>
+    <h2>Registrar asistencia</h2>
 
     <p>
-      Pulsa el botón y acerca la tarjeta a la parte trasera
-      del móvil. Después, elige si el alumno entra o sale.
+      Elige cómo quieres identificar al alumno: mediante su
+      tarjeta NFC o escaneando el QR o código de barras de su carné.
     </p>
 
-    <button id="iniciar">Leer tarjeta NFC</button>
-    <button id="detener" hidden>Detener lectura</button>
+    <button id="iniciarNfc" type="button">
+      Leer tarjeta NFC
+    </button>
+
+    <button id="iniciarCamara" type="button">
+      Escanear QR o código de barras
+    </button>
+
+    <button id="detener" type="button" hidden>
+      Detener lectura
+    </button>
+
+    <div id="lectorCamara" hidden></div>
 
     <div id="acciones" hidden>
-      <button id="entrada" type="button">ENTRADA</button>
-      <button id="salida" type="button">SALIDA</button>
+      <button id="entrada" type="button">
+        ENTRADA
+      </button>
+
+      <button id="salida" type="button">
+        SALIDA
+      </button>
     </div>
 
     <div id="estado" role="status" aria-live="polite">
-      Preparado para iniciar.
+      Preparado para registrar asistencia.
     </div>
 
     <p class="nota">
-      Necesitas un móvil Android compatible con NFC,
-      NFC activado y conexión a Internet.
+      Para NFC necesitas un móvil Android compatible con NFC.
+      Para QR y códigos de barras necesitas una cámara y permiso
+      para utilizarla. Mantén la conexión a Internet activa.
     </p>
   </main>
+
+  <!-- Biblioteca para leer QR y códigos de barras con la cámara -->
+  <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 
   <script>
     const SCRIPT_URL =
       "https://script.google.com/macros/s/AKfycbxCs1Hi1dsE9lm8bK71nzqQyq-f5-pGtDw7f-YGbaVdOLSMySYAYZ7x3bT66_Sfh19R/exec";
 
-    const iniciar = document.getElementById("iniciar");
+    const iniciarNfc = document.getElementById("iniciarNfc");
+    const iniciarCamara = document.getElementById("iniciarCamara");
     const detener = document.getElementById("detener");
+    const lectorCamara = document.getElementById("lectorCamara");
+    const acciones = document.getElementById("acciones");
     const entrada = document.getElementById("entrada");
     const salida = document.getElementById("salida");
-    const acciones = document.getElementById("acciones");
     const estado = document.getElementById("estado");
 
-    let lector = null;
-    let activo = false;
+    let lectorNfc = null;
+    let nfcActivo = false;
+
+    let scannerCamara = null;
+    let camaraActiva = false;
+    let procesandoCamara = false;
+
     let codigoPendiente = null;
     let enviando = false;
+
     let ultimoCodigo = "";
     let ultimaLectura = 0;
 
@@ -174,7 +223,70 @@
       estado.textContent = mensaje;
     }
 
-    iniciar.addEventListener("click", async () => {
+    function actualizarControles() {
+      const hayCodigoPendiente =
+        Boolean(codigoPendiente) || enviando;
+
+      const leyendo = nfcActivo || camaraActiva;
+
+      iniciarNfc.hidden = leyendo || hayCodigoPendiente;
+      iniciarCamara.hidden = leyendo || hayCodigoPendiente;
+      detener.hidden = !leyendo;
+    }
+
+    /**
+     * Procesa el código recibido tanto por NFC como por cámara.
+     */
+    function procesarCodigo(valor, origen) {
+      if (codigoPendiente || enviando) {
+        return;
+      }
+
+      const codigo = String(valor || "")
+        .trim()
+        .toUpperCase();
+
+      if (!/^CG-[A-Z0-9]{6}$/.test(codigo)) {
+        mostrar(
+          "El código leído no es válido. Debe tener un formato " +
+          "como CG-A7K2P9. Comprueba el código impreso en el carné."
+        );
+        actualizarControles();
+        return;
+      }
+
+      const ahora = Date.now();
+
+      if (
+        codigo === ultimoCodigo &&
+        ahora - ultimaLectura < 3000
+      ) {
+        mostrar(
+          "La misma tarjeta se ha leído hace un momento. " +
+          "Espera unos segundos antes de volver a escanearla."
+        );
+        actualizarControles();
+        return;
+      }
+
+      ultimoCodigo = codigo;
+      ultimaLectura = ahora;
+      codigoPendiente = codigo;
+
+      acciones.hidden = false;
+
+      mostrar(
+        "Código " + codigo + " leído mediante " + origen +
+        ". Ahora selecciona ENTRADA o SALIDA."
+      );
+
+      actualizarControles();
+    }
+
+    /**
+     * Inicia la lectura NFC.
+     */
+    iniciarNfc.addEventListener("click", async () => {
       if (!("NDEFReader" in window)) {
         mostrar(
           "Este navegador no admite lectura NFC web. " +
@@ -184,25 +296,26 @@
       }
 
       try {
-        lector = new NDEFReader();
-        await lector.scan();
+        lectorNfc = new NDEFReader();
+        await lectorNfc.scan();
 
-        activo = true;
-        iniciar.hidden = true;
-        detener.hidden = false;
+        nfcActivo = true;
+        actualizarControles();
 
-        mostrar("Lector activado. Acerca una tarjeta NFC.");
+        mostrar(
+          "Lector NFC activado. Acerca la tarjeta al móvil."
+        );
 
-        lector.onreadingerror = () => {
-          if (activo && !codigoPendiente && !enviando) {
+        lectorNfc.onreadingerror = () => {
+          if (nfcActivo && !codigoPendiente && !enviando) {
             mostrar(
-              "No se pudo leer la tarjeta. Inténtalo otra vez."
+              "No se pudo leer la tarjeta NFC. Inténtalo otra vez."
             );
           }
         };
 
-        lector.onreading = (evento) => {
-          if (!activo || codigoPendiente || enviando) {
+        lectorNfc.onreading = (evento) => {
+          if (!nfcActivo || codigoPendiente || enviando) {
             return;
           }
 
@@ -212,7 +325,7 @@
 
           if (!registro) {
             mostrar(
-              "La tarjeta no contiene un registro de texto."
+              "La tarjeta NFC no contiene un registro de texto."
             );
             return;
           }
@@ -221,40 +334,137 @@
             registro.encoding || "utf-8"
           ).decode(registro.data).trim().toUpperCase();
 
-          if (!/^CG-[A-Z0-9]{6}$/.test(codigo)) {
-            mostrar("El código de la tarjeta no es válido.");
-            return;
-          }
-
-          const ahora = Date.now();
-
-          if (
-            codigo === ultimoCodigo &&
-            ahora - ultimaLectura < 3000
-          ) {
-            return;
-          }
-
-          ultimoCodigo = codigo;
-          ultimaLectura = ahora;
-          codigoPendiente = codigo;
-
-          acciones.hidden = false;
-
-          mostrar(
-            "Tarjeta " + codigo +
-            " leída. Selecciona ENTRADA o SALIDA."
-          );
+          procesarCodigo(codigo, "NFC");
         };
 
       } catch (error) {
+        nfcActivo = false;
+        lectorNfc = null;
+        actualizarControles();
+
         mostrar(
           "No se pudo iniciar la lectura NFC. Comprueba que NFC " +
-          "esté activado y permite el acceso si el navegador lo solicita."
+          "esté activado y que el navegador tenga permiso."
         );
       }
     });
 
+    /**
+     * Detiene la cámara y libera sus recursos.
+     */
+    async function detenerCamara() {
+      const scanner = scannerCamara;
+
+      scannerCamara = null;
+      camaraActiva = false;
+      lectorCamara.hidden = true;
+
+      if (scanner) {
+        try {
+          await scanner.stop();
+        } catch (error) {
+          // Puede que la cámara todavía no haya terminado de iniciarse.
+        }
+
+        try {
+          scanner.clear();
+        } catch (error) {
+          // No es necesario hacer nada más si ya se ha limpiado.
+        }
+      }
+
+      lectorCamara.innerHTML = "";
+      actualizarControles();
+    }
+
+    /**
+     * Inicia la cámara para leer QR y códigos de barras.
+     */
+    iniciarCamara.addEventListener("click", async () => {
+      if (
+        !window.Html5Qrcode ||
+        !window.Html5QrcodeSupportedFormats
+      ) {
+        mostrar(
+          "No se ha podido cargar el lector de códigos. " +
+          "Comprueba tu conexión a Internet y recarga la página."
+        );
+        return;
+      }
+
+      try {
+        procesandoCamara = false;
+
+        const formatos = [
+          Html5QrcodeSupportedFormats.QR_CODE,
+          Html5QrcodeSupportedFormats.CODE_128,
+          Html5QrcodeSupportedFormats.CODE_39
+        ];
+
+        scannerCamara = new Html5Qrcode(
+          "lectorCamara",
+          { formatsToSupport: formatos }
+        );
+
+        camaraActiva = true;
+        lectorCamara.hidden = false;
+        actualizarControles();
+
+        mostrar(
+          "Abriendo cámara. Cuando aparezca la imagen, " +
+          "apunta al QR o al código de barras del carné."
+        );
+
+        await scannerCamara.start(
+          { facingMode: "environment" },
+          {
+            fps: 10,
+            qrbox: { width: 250, height: 180 }
+          },
+
+          async (textoLeido) => {
+            if (
+              procesandoCamara ||
+              codigoPendiente ||
+              enviando
+            ) {
+              return;
+            }
+
+            procesandoCamara = true;
+
+            await detenerCamara();
+
+            procesarCodigo(
+              textoLeido,
+              "QR o código de barras"
+            );
+          },
+
+          () => {
+            // Los errores de lectura entre fotogramas son normales.
+          }
+        );
+
+        if (camaraActiva) {
+          mostrar(
+            "Cámara activada. Enfoca el QR o código de barras del carné."
+          );
+        }
+
+      } catch (error) {
+        await detenerCamara();
+
+        mostrar(
+          "No se pudo abrir la cámara. Permite su uso en el navegador " +
+          "y comprueba que otra aplicación no la esté utilizando."
+        );
+      }
+    });
+
+    /**
+     * Envía a Google Sheets la entrada o salida elegida.
+     */
     async function registrarAsistencia(tipo) {
       if (!codigoPendiente || enviando) {
         return;
@@ -268,7 +478,7 @@
 
       mostrar(
         "Enviando " + tipo.toLowerCase() +
-        " de la tarjeta " + codigo + "..."
+        " para " + codigo + "..."
       );
 
       try {
@@ -285,9 +495,10 @@
         });
 
         mostrar(
-          "Solicitud de " + tipo.toLowerCase() +
-          " enviada para " + codigo +
-          ". Comprueba la pestaña Asistencia para confirmar el registro."
+          "Solicitud enviada para " + codigo +
+          " (" + tipo.toLowerCase() + "). " +
+          "Comprueba la pestaña Asistencia de Google Sheets " +
+          "para confirmar que se ha guardado."
         );
 
       } catch (error) {
@@ -300,15 +511,11 @@
         codigoPendiente = null;
         enviando = false;
 
+        acciones.hidden = true;
         entrada.disabled = false;
         salida.disabled = false;
 
-        acciones.hidden = true;
-
-        if (activo) {
-          iniciar.hidden = true;
-          detener.hidden = false;
-        }
+        actualizarControles();
       }
     }
 
@@ -320,19 +527,23 @@
       registrarAsistencia("Salida");
     });
 
-    detener.addEventListener("click", () => {
-      activo = false;
+    /**
+     * Detiene los lectores.
+     */
+    detener.addEventListener("click", async () => {
+      nfcActivo = false;
+      lectorNfc = null;
+
       codigoPendiente = null;
       acciones.hidden = true;
+      procesandoCamara = false;
 
-      lector = null;
-
-      iniciar.hidden = false;
-      detener.hidden = true;
+      await detenerCamara();
 
       entrada.disabled = false;
       salida.disabled = false;
 
+      actualizarControles();
       mostrar("Lectura detenida.");
     });
   </script>
