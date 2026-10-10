@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -7,7 +8,9 @@
   <title>Cole Gon | Asistencia</title>
 
   <style>
-    * { box-sizing: border-box; }
+    * {
+      box-sizing: border-box;
+    }
 
     body {
       margin: 0;
@@ -48,6 +51,11 @@
       margin-top: 12px;
     }
 
+    button:disabled {
+      opacity: 0.6;
+      cursor: wait;
+    }
+
     #iniciar {
       background: #142d4e;
       color: white;
@@ -56,6 +64,32 @@
     #detener {
       background: #e8edf3;
       color: #142d4e;
+    }
+
+    #acciones {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-top: 14px;
+    }
+
+    #acciones[hidden] {
+      display: none;
+    }
+
+    #acciones button {
+      margin-top: 0;
+      min-height: 58px;
+    }
+
+    #entrada {
+      background: #176b45;
+      color: white;
+    }
+
+    #salida {
+      background: #a83232;
+      color: white;
     }
 
     #estado {
@@ -72,6 +106,17 @@
       font-size: 13px;
       line-height: 1.5;
     }
+
+    @media (max-width: 380px) {
+      main {
+        margin: 16px 10px;
+        padding: 18px;
+      }
+
+      #acciones {
+        grid-template-columns: 1fr;
+      }
+    }
   </style>
 </head>
 
@@ -86,11 +131,16 @@
 
     <p>
       Pulsa el botón y acerca la tarjeta a la parte trasera
-      del móvil. Mantén esta página abierta durante la lectura.
+      del móvil. Después, elige si el alumno entra o sale.
     </p>
 
     <button id="iniciar">Leer tarjeta NFC</button>
     <button id="detener" hidden>Detener lectura</button>
+
+    <div id="acciones" hidden>
+      <button id="entrada" type="button">ENTRADA</button>
+      <button id="salida" type="button">SALIDA</button>
+    </div>
 
     <div id="estado" role="status" aria-live="polite">
       Preparado para iniciar.
@@ -108,10 +158,15 @@
 
     const iniciar = document.getElementById("iniciar");
     const detener = document.getElementById("detener");
+    const entrada = document.getElementById("entrada");
+    const salida = document.getElementById("salida");
+    const acciones = document.getElementById("acciones");
     const estado = document.getElementById("estado");
 
     let lector = null;
     let activo = false;
+    let codigoPendiente = null;
+    let enviando = false;
     let ultimoCodigo = "";
     let ultimaLectura = 0;
 
@@ -139,18 +194,26 @@
         mostrar("Lector activado. Acerca una tarjeta NFC.");
 
         lector.onreadingerror = () => {
-          mostrar("No se pudo leer la tarjeta. Inténtalo otra vez.");
+          if (activo && !codigoPendiente && !enviando) {
+            mostrar(
+              "No se pudo leer la tarjeta. Inténtalo otra vez."
+            );
+          }
         };
 
-        lector.onreading = async (evento) => {
-          if (!activo) return;
+        lector.onreading = (evento) => {
+          if (!activo || codigoPendiente || enviando) {
+            return;
+          }
 
           const registro = Array.from(
             evento.message.records
           ).find(r => r.recordType === "text");
 
           if (!registro) {
-            mostrar("La tarjeta no contiene un registro de texto.");
+            mostrar(
+              "La tarjeta no contiene un registro de texto."
+            );
             return;
           }
 
@@ -174,30 +237,14 @@
 
           ultimoCodigo = codigo;
           ultimaLectura = ahora;
+          codigoPendiente = codigo;
 
-          mostrar("Tarjeta " + codigo + " leída. Enviando…");
+          acciones.hidden = false;
 
-          try {
-            await fetch(SCRIPT_URL, {
-              method: "POST",
-              mode: "no-cors",
-              headers: {
-                "Content-Type": "text/plain;charset=UTF-8"
-              },
-              body: JSON.stringify({ codigo: codigo })
-            });
-
-            mostrar(
-              "Solicitud enviada para " + codigo +
-              ". Comprueba la hoja de Google Sheets para confirmar " +
-              "que se ha registrado correctamente."
-            );
-          } catch (error) {
-            mostrar(
-              "No se pudo enviar la solicitud. " +
-              "Comprueba la conexión y la URL de Apps Script."
-            );
-          }
+          mostrar(
+            "Tarjeta " + codigo +
+            " leída. Selecciona ENTRADA o SALIDA."
+          );
         };
 
       } catch (error) {
@@ -208,11 +255,84 @@
       }
     });
 
+    async function registrarAsistencia(tipo) {
+      if (!codigoPendiente || enviando) {
+        return;
+      }
+
+      const codigo = codigoPendiente;
+      enviando = true;
+
+      entrada.disabled = true;
+      salida.disabled = true;
+
+      mostrar(
+        "Enviando " + tipo.toLowerCase() +
+        " de la tarjeta " + codigo + "..."
+      );
+
+      try {
+        await fetch(SCRIPT_URL, {
+          method: "POST",
+          mode: "no-cors",
+          headers: {
+            "Content-Type": "text/plain;charset=UTF-8"
+          },
+          body: JSON.stringify({
+            codigo: codigo,
+            tipo: tipo
+          })
+        });
+
+        mostrar(
+          "Solicitud de " + tipo.toLowerCase() +
+          " enviada para " + codigo +
+          ". Comprueba la pestaña Asistencia para confirmar el registro."
+        );
+
+      } catch (error) {
+        mostrar(
+          "No se pudo enviar la solicitud. Comprueba la conexión " +
+          "a Internet y la URL de Apps Script."
+        );
+
+      } finally {
+        codigoPendiente = null;
+        enviando = false;
+
+        entrada.disabled = false;
+        salida.disabled = false;
+
+        acciones.hidden = true;
+
+        if (activo) {
+          iniciar.hidden = true;
+          detener.hidden = false;
+        }
+      }
+    }
+
+    entrada.addEventListener("click", () => {
+      registrarAsistencia("Entrada");
+    });
+
+    salida.addEventListener("click", () => {
+      registrarAsistencia("Salida");
+    });
+
     detener.addEventListener("click", () => {
       activo = false;
+      codigoPendiente = null;
+      acciones.hidden = true;
+
       lector = null;
+
       iniciar.hidden = false;
       detener.hidden = true;
+
+      entrada.disabled = false;
+      salida.disabled = false;
+
       mostrar("Lectura detenida.");
     });
   </script>
