@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -8,7 +7,9 @@
   <title>Cole Gon | Asistencia</title>
 
   <style>
-    * { box-sizing: border-box; }
+    * {
+      box-sizing: border-box;
+    }
 
     body {
       margin: 0;
@@ -179,6 +180,8 @@
   <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 
   <script>
+    "use strict";
+
     const SCRIPT_URL =
       "https://script.google.com/macros/s/AKfycbxCs1Hi1dsE9lm8bK71nzqQyq-f5-pGtDw7f-YGbaVdOLSMySYAYZ7x3bT66_Sfh19R/exec";
 
@@ -220,14 +223,18 @@
     }
 
     function procesarCodigo(valor, origen) {
-      if (codigoPendiente || enviando) return;
+      if (codigoPendiente || enviando) {
+        return;
+      }
 
       const codigo = String(valor || "")
         .trim()
         .toUpperCase();
 
       if (!/^CG-[A-Z0-9]{6}$/.test(codigo)) {
-        mostrar("El código leído no es válido.");
+        mostrar(
+          "El código leído no es válido. Comprueba el QR o la tarjeta."
+        );
         actualizarControles();
         return;
       }
@@ -238,7 +245,9 @@
         codigo === ultimoCodigo &&
         ahora - ultimaLectura < 3000
       ) {
-        mostrar("Espera unos segundos antes de volver a escanear.");
+        mostrar(
+          "Espera unos segundos antes de volver a escanear."
+        );
         actualizarControles();
         return;
       }
@@ -261,20 +270,23 @@
     iniciarNfc.addEventListener("click", async () => {
       if (!("NDEFReader" in window)) {
         mostrar(
-          "Este navegador no admite NFC web. Prueba Chrome actualizado " +
-          "en Android y comprueba que NFC esté activado."
+          "Este navegador no admite NFC web. " +
+          "Prueba Chrome actualizado en Android y comprueba que NFC esté activado."
         );
         return;
       }
 
       try {
         lectorNfc = new NDEFReader();
+
         await lectorNfc.scan();
 
         nfcActivo = true;
         actualizarControles();
 
-        mostrar("Lector NFC activado. Acerca una tarjeta.");
+        mostrar(
+          "Lector NFC activado. Acerca una tarjeta."
+        );
 
         lectorNfc.onreadingerror = () => {
           if (nfcActivo && !codigoPendiente && !enviando) {
@@ -283,27 +295,37 @@
         };
 
         lectorNfc.onreading = (evento) => {
-          if (!nfcActivo || codigoPendiente || enviando) return;
+          if (!nfcActivo || codigoPendiente || enviando) {
+            return;
+          }
 
           const registro = Array.from(
             evento.message.records
-          ).find(r => r.recordType === "text");
+          ).find((r) => r.recordType === "text");
 
           if (!registro) {
-            mostrar("La tarjeta no contiene un registro de texto.");
+            mostrar(
+              "La tarjeta no contiene un registro de texto."
+            );
             return;
           }
 
           const codigo = new TextDecoder(
             registro.encoding || "utf-8"
-          ).decode(registro.data).trim().toUpperCase();
+          )
+            .decode(registro.data)
+            .trim()
+            .toUpperCase();
 
           procesarCodigo(codigo, "NFC");
         };
 
       } catch (error) {
+        console.error("Error al iniciar NFC:", error);
+
         nfcActivo = false;
         lectorNfc = null;
+
         actualizarControles();
 
         mostrar(
@@ -316,6 +338,7 @@
     // DETENER LA CÁMARA
     async function detenerCamara() {
       const scanner = scannerCamara;
+
       scannerCamara = null;
       camaraActiva = false;
       lectorCamara.hidden = true;
@@ -323,11 +346,15 @@
       if (scanner) {
         try {
           await scanner.stop();
-        } catch (error) {}
+        } catch (error) {
+          console.warn("No se pudo detener la cámara:", error);
+        }
 
         try {
           scanner.clear();
-        } catch (error) {}
+        } catch (error) {
+          console.warn("No se pudo limpiar el lector:", error);
+        }
       }
 
       lectorCamara.innerHTML = "";
@@ -338,7 +365,7 @@
     iniciarCamara.addEventListener("click", async () => {
       if (!window.Html5Qrcode) {
         mostrar(
-          "No se pudo cargar el lector. Comprueba Internet y recarga."
+          "No se pudo cargar el lector. Comprueba Internet y recarga la página."
         );
         return;
       }
@@ -359,8 +386,8 @@
 
         camaraActiva = true;
         lectorCamara.hidden = false;
-        actualizarControles();
 
+        actualizarControles();
         mostrar("Abriendo cámara...");
 
         await scannerCamara.start(
@@ -374,7 +401,9 @@
               procesandoCamara ||
               codigoPendiente ||
               enviando
-            ) return;
+            ) {
+              return;
+            }
 
             procesandoCamara = true;
 
@@ -389,22 +418,28 @@
         );
 
         if (camaraActiva) {
-          mostrar("Apunta al QR o código de barras del carné.");
+          mostrar(
+            "Apunta al QR o código de barras del carné."
+          );
         }
 
       } catch (error) {
+        console.error("Error al abrir la cámara:", error);
+
         await detenerCamara();
 
         mostrar(
           "No se pudo abrir la cámara. Permite el acceso desde " +
-          el navegador y comprueba que la cámara esté disponible."
+          "el navegador y comprueba que la cámara esté disponible."
         );
       }
     });
 
     // ENVÍO A GOOGLE SHEETS
     async function registrarAsistencia(tipo, motivo = "") {
-      if (!codigoPendiente || enviando) return;
+      if (!codigoPendiente || enviando) {
+        return;
+      }
 
       const codigo = codigoPendiente;
       enviando = true;
@@ -412,8 +447,11 @@
       entrada.disabled = true;
       salida.disabled = true;
 
+      actualizarControles();
+
       mostrar(
-        "Enviando " + tipo.toLowerCase() + " para " + codigo + "..."
+        "Enviando " + tipo.toLowerCase() +
+        " para " + codigo + "..."
       );
 
       try {
@@ -437,6 +475,8 @@
         );
 
       } catch (error) {
+        console.error("Error al enviar la asistencia:", error);
+
         mostrar(
           "No se pudo enviar la solicitud. Comprueba Internet " +
           "y la dirección de Apps Script."
@@ -454,14 +494,16 @@
       }
     }
 
-    // ENTRADA: se registra inmediatamente, sin preguntar nada.
+    // ENTRADA
     entrada.addEventListener("click", () => {
       registrarAsistencia("Entrada");
     });
 
-    // SALIDA: pregunta el motivo antes de enviar el registro.
+    // SALIDA: solicita el motivo antes de registrar
     salida.addEventListener("click", () => {
-      if (!codigoPendiente || enviando) return;
+      if (!codigoPendiente || enviando) {
+        return;
+      }
 
       const motivo = window.prompt(
         "Indica el motivo de la salida del alumno:"
@@ -486,7 +528,7 @@
       registrarAsistencia("Salida", motivo.trim());
     });
 
-    // DETENER LECTURA
+    // DETENER LA LECTURA
     detener.addEventListener("click", async () => {
       nfcActivo = false;
       lectorNfc = null;
@@ -501,6 +543,7 @@
       salida.disabled = false;
 
       actualizarControles();
+
       mostrar("Lectura detenida.");
     });
   </script>
